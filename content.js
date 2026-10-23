@@ -7,8 +7,8 @@
 
   // ========== 配置 ==========
   const DEBOUNCE_MS = 400;      // 输入防抖时间
-  const MAX_CANDIDATES = 5;     // 浮层最大候选数
-  const LOCAL_TOP_N = 3;        // 本地降级匹配 top N
+  const MAX_CANDIDATES = 2;     // 浮层最大候选数
+  const LOCAL_TOP_N = 2;        // 本地降级匹配 top N
   const MAX_PARENT_TEXT = 120;  // 父级上下文文本最大截断长度
 
   // ========== 状态 ==========
@@ -18,6 +18,8 @@
   let overlayHost = null;       // Shadow DOM 宿主
   let overlayRoot = null;       // Shadow Root
   let overlayEl = null;         // 浮层容器
+  let overlayManual = null;     // 手动拖拽位置 {left, top}；非 null 时浮层不自动跟随输入框
+  let dragState = null;         // 拖拽中状态 {startX, startY, origLeft, origTop}
 
   // ========== 缓存初始化与刷新 ==========
   loadPhrases();
@@ -47,13 +49,11 @@
   });
 
   // ========== 可输入控件识别 ==========
+  // 只检测通用文本输入，排除带 datalist 的原生选择菜单输入框（避免浮层遮挡其下拉菜单）
   const INPUT_SELECTOR = [
-    'input[type="text"]',
-    'input[type="search"]',
-    'input[type="email"]',
-    'input[type="url"]',
-    'input[type="tel"]',
-    'input:not([type])',
+    'input[type="text"]:not([list])',
+    'input[type="search"]:not([list])',
+    'input:not([type]):not([list])',
     'textarea',
     '[contenteditable="true"]'
   ].join(',');
@@ -104,6 +104,25 @@
     if (overlayEl && e.composedPath().includes(overlayEl)) return;
     hideOverlay();
   }, true);
+
+  // 拖拽中：移动浮层，限制在视口内
+  document.addEventListener('mousemove', (e) => {
+    if (!dragState) return;
+    const maxLeft = Math.max(window.innerWidth - overlayEl.offsetWidth, 0);
+    const maxTop = Math.max(window.innerHeight - overlayEl.offsetHeight, 0);
+    const left = Math.min(Math.max(dragState.origLeft + (e.clientX - dragState.startX), 0), maxLeft);
+    const top = Math.min(Math.max(dragState.origTop + (e.clientY - dragState.startY), 0), maxTop);
+    overlayEl.style.left = left + 'px';
+    overlayEl.style.top = top + 'px';
+  });
+
+  // 拖拽结束：锁定手动位置，不再自动跟随输入框
+  document.addEventListener('mouseup', () => {
+    if (!dragState) return;
+    const rect = overlayEl.getBoundingClientRect();
+    overlayManual = { left: rect.left, top: rect.top };
+    dragState = null;
+  });
 
   // 滚动 / 缩放时重定位浮层
   window.addEventListener('scroll', repositionOverlay, true);
@@ -182,6 +201,16 @@
     if (!activeElement || !activeElement.isConnected) return;
 
     const context = collectContext(activeElement);
+
+    // 无任何场景信号（输入值/占位符/标签/上下文文本均空）时不弹浮层，避免对无关输入框打扰
+    const hasSignal = [
+      context.inputValue, context.placeholder, context.ariaLabel,
+      context.label, context.nameId, context.parentText
+    ].some(Boolean);
+    if (!hasSignal) {
+      hideOverlay();
+      return;
+    }
 
     // 第一步：本地快速匹配（毫秒级，不依赖网络）
     const localCandidates = localMatch(context);
@@ -304,6 +333,7 @@
       '.qpa-banner {',
       '  padding: 6px 12px; font-size: 11px; color: #86909c;',
       '  border-bottom: 1px solid #f2f3f5; background: #fafafa;',
+      '  cursor: move; user-select: none;',
       '}',
       '.qpa-empty {',
       '  padding: 14px 12px; text-align: center; color: #86909c; font-size: 12px;',
@@ -321,6 +351,14 @@
 
     overlayEl = document.createElement('div');
     overlayEl.className = 'qpa-overlay';
+    // 拖拽启动：按住顶部 banner 拖动浮层（事件委托，banner 每次渲染重建也能命中）
+    overlayEl.addEventListener('mousedown', (e) => {
+      const banner = e.target.closest && e.target.closest('.qpa-banner');
+      if (!banner) return;
+      e.preventDefault();
+      const rect = overlayEl.getBoundingClientRect();
+      dragState = { startX: e.clientX, startY: e.clientY, origLeft: rect.left, origTop: rect.top };
+    });
     overlayRoot.appendChild(overlayEl);
   }
 
@@ -393,7 +431,14 @@
    * 直接使用 getBoundingClientRect 的视口坐标，无需再叠加 scrollX/scrollY。
    */
   function repositionOverlay() {
-    if (!overlayEl || !activeElement || !activeElement.isConnected) return;
+    if (!overlayEl) return;
+    // 手动拖拽后保持用户放置位置，不自动跟随输入框（避免遮挡输入框自带菜单时被拉回）
+    if (overlayManual) {
+      overlayEl.style.left = overlayManual.left + 'px';
+      overlayEl.style.top = overlayManual.top + 'px';
+      return;
+    }
+    if (!activeElement || !activeElement.isConnected) return;
 
     const rect = activeElement.getBoundingClientRect();
     const left = Math.min(Math.max(rect.left, 4), window.innerWidth - 320);
@@ -404,6 +449,8 @@
 
   function hideOverlay() {
     if (overlayEl) overlayEl.style.display = 'none';
+    overlayManual = null;
+    dragState = null;
   }
 
   // ========== 填入文本（原生 setter + 事件派发，确保 React/Vue 感知）==========
