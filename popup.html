@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>Quick Phrase AI</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="header">
+    <h1>Quick Phrase AI</h1>
+    <span class="subtitle">常用语管理 · AI 推荐</span>
+  </header>
+
+  <main>
+    <!-- 常用语列表 -->
+    <section class="section">
+      <div class="section-title">常用语列表 <span id="count" class="count"></span></div>
+      <ul id="phraseList" class="phrase-list"></ul>
+      <p id="emptyTip" class="empty-tip" hidden>暂无常用语，先添加一条吧</p>
+    </section>
+
+    <!-- 添加 / 编辑常用语 -->
+    <section class="section">
+      <div class="section-title" id="addTitle">添加常用语</div>
+      <textarea id="newText" class="new-text" placeholder="输入常用语内容" rows="2"></textarea>
+      <input id="newTag" class="new-tag" type="text" placeholder="标签（如：工作 / 回复 / 邮件）">
+      <button id="addBtn" class="btn btn-primary">保存常用语</button>
+      <button id="cancelEditBtn" class="btn" hidden>取消编辑</button>
+      <p class="tip">提示：按 Ctrl + Enter 可快速保存常用语</p>
+    </section>
+
+    <!-- AI 配置 -->
+    <section class="section">
+      <div class="section-title">AI 配置</div>
+
+      <label class="field-label" for="provider">Provider</label>
+      <select id="provider" class="input">
+        <option value="openai">OpenAI</option>
+        <option value="deepseek">DeepSeek</option>
+        <option value="moonshot">Moonshot (Kimi)</option>
+        <option value="qwen">通义千问</option>
+        <option value="custom">自定义</option>
+      </select>
+
+      <label class="field-label" for="apiKey">API Key</label>
+      <input id="apiKey" class="input" type="password" placeholder="sk-...">
+
+      <label class="field-label" for="model">Model</label>
+      <input id="model" class="input" type="text" placeholder="gpt-4o-mini">
+
+      <label class="field-label" for="baseUrl">Base URL（可选）</label>
+      <input id="baseUrl" class="input" type="text" placeholder="https://api.openai.com/v1">
+
+      <button id="saveConfigBtn" class="btn btn-primary">保存 AI 配置</button>
+
+      <!-- 测试连接操作区 -->
+      <div class="test-row">
+        <button id="testBtn" class="btn btn-secondary">测试连接</button>
+      </div>
+      <p id="testResult" class="test-result" hidden></p>
+
+      <p class="tip">自定义 baseUrl 需同步在 manifest.json 的 host_permissions 中添加对应域名，否则请求会被浏览器拦截。</p>
+    </section>
+  </main>
+
+  <script src="popup.js"></script>
+</body>
+</html>
