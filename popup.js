@@ -19,7 +19,9 @@ const DEFAULT_SHORTCUTS = {
   toggleEnabled: 'Alt+Q',
   manualSuggest: 'Alt+Space',
   closeCooldown: 'Alt+X',
-  fillTop: 'Ctrl+Shift+Enter'
+  fillTop: 'Ctrl+Shift+Enter',
+  select1: 'Alt+1',
+  select2: 'Alt+2'
 };
 const DEFAULT_COOLDOWN_SEC = 30;
 
@@ -28,7 +30,9 @@ const SHORTCUT_FIELDS = {
   toggleEnabled: 'shortcutToggle',
   manualSuggest: 'shortcutSuggest',
   closeCooldown: 'shortcutClose',
-  fillTop: 'shortcutFill'
+  fillTop: 'shortcutFill',
+  select1: 'shortcutSelect1',
+  select2: 'shortcutSelect2'
 };
 
 // 标签分隔符：支持逗号 / 分号 / 顿号，录入时按分隔符拆分为多个标签
