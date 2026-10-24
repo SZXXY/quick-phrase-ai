@@ -13,6 +13,15 @@
   const MIN_ABSORB_LEN = 2;     // 静默吸收词最短长度（字符）
   const MAX_ABSORB_LEN = 50;    // 静默吸收词最长长度（字符）
 
+  // ========== 默认快捷键与冷却（background 初始化时会写入 storage，此处兜底） ==========
+  const DEFAULT_SHORTCUTS = {
+    toggleEnabled: 'Alt+Q',        // 切换推荐功能总开关
+    manualSuggest: 'Alt+Space',    // 手动触发当前聚焦输入框的推荐
+    closeCooldown: 'Alt+X',        // 关闭浮层与虚影并进入冷却
+    fillTop: 'Ctrl+Shift+Enter'    // 直接补全最高可能候选/虚影
+  };
+  const DEFAULT_COOLDOWN_SEC = 30; // 关闭浮层后的默认冷却秒数，0 表示关闭冷却
+
   // ========== 多标签工具（兼容旧数据单标签字符串） ==========
   /** 标签分隔符：中英文逗号 / 顿号 / 分号 / 空白 */
   const TAG_SEP = /[,，、;；\s]+/;
@@ -118,6 +127,11 @@
   let overlayItems = [];        // 当前浮层候选项 [{el, candidate}]
   let selectedIndex = -1;       // 键盘导航高亮索引（-1 表示无高亮）
   let userNavigated = false;    // 用户是否已用 ↑/↓ 切换过高亮（Enter 优先填候选而非补全虚影）
+  let settingsCache = null;     // settings 完整对象（enabled / cooldownSec / shortcuts）
+  let shortcutsCache = null;    // 快捷键映射（功能名 -> 组合键字符串，如 'Alt+Q'）
+  let cooldownSec = DEFAULT_COOLDOWN_SEC; // 关闭浮层后冷却秒数（0 关闭冷却）
+  let enabled = true;           // 推荐功能总开关（停用时浮层与虚影均不显示）
+  let cooldownUntil = 0;        // 冷却截止时间戳（ms）；仅内存态，不持久化
   let ghostEl = null;           // 虚影元素（Shadow DOM 内 .qpa-ghost）
   let ghostCandidate = null;    // 当前虚影候选 {phraseId?, text, tag, reason, absorbCount?}
   let ghostPrefix = '';         // 触发虚影时输入框已输入前缀
@@ -145,12 +159,42 @@
     if (changes.absorbed) {
       absorbedCache = Array.isArray(changes.absorbed.newValue) ? changes.absorbed.newValue : [];
     }
+    if (changes.settings) {
+      applySettings(changes.settings.newValue || {});
+    }
   });
+
+  /** 应用快捷键 / 冷却 / 总开关设置（缺省时用默认值兜底） */
+  function applySettings(settings) {
+    settingsCache = settings || {};
+    shortcutsCache = Object.assign({}, DEFAULT_SHORTCUTS, (settings && settings.shortcuts) || {});
+    cooldownSec = (settings && typeof settings.cooldownSec === 'number' && isFinite(settings.cooldownSec))
+      ? Math.max(0, settings.cooldownSec) : DEFAULT_COOLDOWN_SEC;
+    enabled = (settings && settings.enabled !== undefined) ? !!settings.enabled : true;
+    if (!enabled) {
+      hideOverlay();
+      hideGhost();
+    }
+  }
+
+  /** 从 storage 读取设置（启动时调用） */
+  async function loadSettings() {
+    try {
+      const data = await chrome.storage.local.get(['settings']);
+      applySettings(data.settings || {});
+    } catch (e) {
+      console.warn('[QuickPhraseAI] load settings failed:', e);
+    }
+  }
 
   // 显式通知刷新（popup 保存后 sendMessage）
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message && message.type === 'PHRASES_UPDATED') {
       loadPhrases().then(() => sendResponse({ ok: true }));
+      return true;
+    }
+    if (message && message.type === 'SETTINGS_UPDATED') {
+      loadSettings().then(() => sendResponse({ ok: true }));
       return true;
     }
   });
@@ -195,7 +239,15 @@
       hideGhost(); // 手动锁定浮层时浮层保持，但虚影失焦即隐藏
       return;
     }
-    setTimeout(hideOverlay, 200);
+    setTimeout(() => {
+      if (!activeElement || !activeElement.isConnected) return;
+      const next = findEditableHost(document.activeElement);
+      const wasVisible = overlayVisible() || !!ghostCandidate;
+      hideOverlay();
+      // 焦点移出到非输入区域（且此前浮层/虚影可见）：视为手动关闭，进入冷却；
+      // 焦点仍落在可编辑输入框（切换输入框 / 点击回输入框）不触发冷却。
+      if (!next && wasVisible) enterCooldown();
+    }, 200);
   });
 
   /**
@@ -222,6 +274,118 @@
     if (activeElement && (e.target === activeElement || activeElement.contains(e.target))) scheduleSuggest();
   }, true);
 
+  // ========== 自定义快捷键（document 捕获阶段比对，Alt+Space 需在此拦截系统菜单） ==========
+  /**
+   * 将 keydown 事件解析为规范组合键字符串（如 'Alt+Space' / 'Ctrl+Shift+Enter'）。
+   * 仅处理「修饰键 + 非纯字符主键」的组合：字母 / 数字 / F 键 / Space / Enter / Esc，
+   * 且必须含 Ctrl / Alt / Meta 之一 —— Shift+字母（输出大写）等纯字符输入不视为快捷键，
+   * 避免拦截普通打字。
+   */
+  function normalizeShortcut(e) {
+    const key = e.key;
+    let main = null;
+    if (/^[a-zA-Z]$/.test(key)) main = key.toUpperCase();
+    else if (/^[0-9]$/.test(key)) main = key;
+    else if (/^F([1-9]|1[0-2])$/.test(key)) main = key;
+    else if (key === ' ' || key === 'Spacebar') main = 'Space';
+    else if (key === 'Enter') main = 'Enter';
+    else if (key === 'Escape') main = 'Esc';
+    else return null;
+
+    if (!(e.ctrlKey || e.altKey || e.metaKey)) return null;
+
+    const parts = [];
+    if (e.ctrlKey) parts.push('Ctrl');
+    if (e.altKey) parts.push('Alt');
+    if (e.shiftKey) parts.push('Shift');
+    if (e.metaKey) parts.push('Meta');
+    parts.push(main);
+    return parts.join('+');
+  }
+
+  /** 快捷键总入口：命中自定义组合键时执行对应功能 */
+  function handleShortcutKeydown(e) {
+    if (!shortcutsCache) return;
+    const combo = normalizeShortcut(e);
+    if (!combo) return;
+
+    let matchedFn = null;
+    for (const fn of Object.keys(shortcutsCache)) {
+      if (shortcutsCache[fn] === combo) { matchedFn = fn; break; }
+    }
+    if (!matchedFn) return;
+
+    // 命中快捷键：阻止默认行为（尤其 Alt+Space 在 Windows 会唤起窗口/输入法菜单）
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (matchedFn === 'toggleEnabled') toggleEnabledShortcut();
+    else if (matchedFn === 'manualSuggest') manualSuggestShortcut();
+    else if (matchedFn === 'closeCooldown') closeAndCooldownShortcut();
+    else if (matchedFn === 'fillTop') fillTopShortcut();
+  }
+  document.addEventListener('keydown', handleShortcutKeydown, true);
+
+  /** Alt+Q：切换推荐功能总开关（停用时隐藏浮层与虚影，开关状态持久化） */
+  async function toggleEnabledShortcut() {
+    enabled = !enabled;
+    if (!enabled) {
+      hideOverlay();
+      hideGhost();
+    }
+    const settings = Object.assign({}, settingsCache || {});
+    settings.enabled = enabled;
+    try { await chrome.storage.local.set({ settings }); } catch (e) { /* 忽略 */ }
+  }
+
+  /** Alt+Space：手动触发推荐（跳过场景信号检查，也不受冷却限制） */
+  function manualSuggestShortcut() {
+    if (!enabled) return;
+    const host = findEditableHost(document.activeElement);
+    if (!host) return;
+    activeElement = host;
+    clearTimeout(debounceTimer);
+    collectAndSuggest(true);
+  }
+
+  /** Alt+X：关闭浮层与虚影并进入冷却 */
+  function closeAndCooldownShortcut() {
+    hideOverlay();
+    hideGhost();
+    enterCooldown();
+  }
+
+  /** Ctrl+Shift+Enter：直接补全当前最高可能候选（虚影优先，其次候选框第一项） */
+  function fillTopShortcut() {
+    const host = activeElement && activeElement.isConnected
+      ? activeElement : findEditableHost(document.activeElement);
+    if (!host) return;
+    activeElement = host;
+    if (ghostCandidate) {
+      applyGhost();
+      return;
+    }
+    if (overlayItems.length > 0) {
+      fillCandidate(overlayItems[0].candidate);
+    }
+  }
+
+  /** 关闭后冷却：手动关闭（X / Esc / Alt+X / 点击空白）进入冷却期，期间自动推荐不弹框 */
+  function inCooldown() {
+    if (cooldownSec <= 0) return false;
+    return Date.now() < cooldownUntil;
+  }
+
+  function enterCooldown() {
+    if (cooldownSec <= 0) return;
+    cooldownUntil = Date.now() + cooldownSec * 1000;
+  }
+
+  /** 当前浮层是否可见 */
+  function overlayVisible() {
+    return !!(overlayEl && overlayEl.style.display === 'block');
+  }
+
   // 键盘导航（浮层可见或存在虚影时）：
   // ↑/↓ 切换候选高亮（初始高亮第一项，鼠标悬停同步高亮）；
   // Enter 补全虚影（未用 ↑/↓ 导航过时）；用户导航过则 Enter 填入当前高亮候选；
@@ -230,15 +394,21 @@
   document.addEventListener('keydown', (e) => {
     const visible = overlayEl && overlayEl.style.display === 'block' && overlayItems.length > 0;
     const ghostVisible = !!ghostCandidate;
+    // 带 Ctrl/Alt/Meta 修饰的按键交给自定义快捷键（handleShortcutKeydown）处理，
+    // 避免 Ctrl+Shift+Enter 等组合被导航逻辑误触发。
+    const modless = !(e.ctrlKey || e.altKey || e.metaKey);
 
-    if (e.key === 'Escape') {
-      hideOverlay();
+    if (e.key === 'Escape' && modless) {
+      if (overlayVisible() || ghostVisible) {
+        hideOverlay();
+        enterCooldown(); // 手动 Esc 关闭进入冷却
+      }
       return;
     }
 
     if (!visible && !ghostVisible) return;
 
-    if (e.key === 'ArrowDown') {
+    if (e.key === 'ArrowDown' && modless) {
       if (!visible) return;
       e.preventDefault();
       e.stopPropagation();
@@ -258,7 +428,7 @@
       return;
     }
 
-    if (e.key === 'Enter' || e.key === 'Tab') {
+    if ((e.key === 'Enter' || e.key === 'Tab') && modless) {
       // 虚影优先：Tab 始终补全虚影；Enter 仅在用户未导航过时补全虚影
       const takeGhost = ghostVisible && (e.key === 'Tab' || !userNavigated);
       if (takeGhost) {
@@ -298,7 +468,9 @@
     }
 
     if (overlayManual) return;
+    const wasVisible = overlayVisible();
     hideOverlay();
+    if (wasVisible) enterCooldown(); // 点击空白手动关闭进入冷却
   }, true);
 
   // 拖拽中：移动浮层，限制在视口内
@@ -393,17 +565,30 @@
   }
 
   // ========== 本地优先匹配；无命中才调用 AI ==========
-  async function collectAndSuggest() {
+  async function collectAndSuggest(force) {
     if (!activeElement || !activeElement.isConnected) return;
+    // 总开关停用：不弹浮层与虚影（手动快捷键同样受总开关限制）
+    if (!enabled) {
+      hideOverlay();
+      hideGhost();
+      return;
+    }
+    // 冷却期：自动推荐不弹框；手动快捷键（Alt+Space, force=true）不受冷却限制
+    if (!force && inCooldown()) {
+      hideOverlay();
+      hideGhost();
+      return;
+    }
 
     const context = collectContext(activeElement);
 
-    // 无任何场景信号（输入值/占位符/标签/上下文文本均空）时不弹浮层，避免对无关输入框打扰
+    // 无任何场景信号（输入值/占位符/标签/上下文文本均空）时不弹浮层，避免对无关输入框打扰；
+    // 手动触发（force）时跳过该检查，按本地检索 / AI 流程正常执行。
     const hasSignal = [
       context.inputValue, context.placeholder, context.ariaLabel,
       context.label, context.nameId, context.parentText
     ].some(Boolean);
-    if (!hasSignal) {
+    if (!force && !hasSignal) {
       hideOverlay();
       return;
     }
@@ -831,6 +1016,7 @@
       e.preventDefault();
       e.stopPropagation();
       hideOverlay();
+      enterCooldown(); // 点击 X 手动关闭进入冷却
     });
 
     banner.appendChild(title);
@@ -956,4 +1142,7 @@
 
     hideOverlay();
   }
+
+  // 启动时加载快捷键 / 冷却 / 总开关设置
+  loadSettings();
 })();
