@@ -62,49 +62,75 @@ async function ensureDefaultSettings() {
   }
 }
 
-// ========== 消息入口 ==========
+// ========== 消息入口（统一超时兜底 + 保证 sendResponse 被调用） ==========
+const MSG_TIMEOUT_MS = 8000; // 异步消息处理超时（8 秒），防止通道悬挂
+
+/**
+ * 异步消息处理统一封装：
+ * - Promise.race 超时兜底（8 秒后回发 { ok:false, error:'timeout' }）；
+ * - .catch 保证 sendResponse 一定被调用（handler 异常时回发错误）；
+ * - responded 标志避免重复调用 sendResponse，杜绝"return true 但通道关闭"报错。
+ */
+function withTimeout(promise, sendResponse) {
+  let responded = false;
+  const timer = setTimeout(() => {
+    done({ ok: false, error: 'timeout' });
+  }, MSG_TIMEOUT_MS);
+
+  function done(res) {
+    if (responded) return;
+    responded = true;
+    clearTimeout(timer);
+    try { sendResponse(res); } catch (e) { /* 通道已关闭（发送方页面已关），忽略 */ }
+  }
+
+  Promise.resolve(promise)
+    .then((res) => done(res))
+    .catch((err) => done({ ok: false, error: String((err && err.message) || err) }));
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message.type !== 'string') return;
 
   // AI 推荐请求：异步处理，保持消息通道开启
   if (message.type === 'AI_SUGGEST') {
-    handleAISuggest(message.payload || {}).then(sendResponse);
+    withTimeout(handleAISuggest(message.payload || {}), sendResponse);
     return true;
   }
 
   // 常用语更新通知：刷新缓存后回执
   if (message.type === 'PHRASES_UPDATED') {
-    reloadCache().then(() => sendResponse({ ok: true }));
+    withTimeout(reloadCache().then(() => ({ ok: true })), sendResponse);
     return true;
   }
 
   // AI 连通性测试：异步处理，保持消息通道开启
   if (message.type === 'AI_TEST') {
-    handleAITest().then(sendResponse);
+    withTimeout(handleAITest(), sendResponse);
     return true;
   }
 
   // AI 提取常用语：自由文本 -> 常用语列表（不可用时降级按行拆分）
   if (message.type === 'AI_EXTRACT_PHRASES') {
-    handleAIExtractPhrases(message.payload || {}).then(sendResponse);
+    withTimeout(handleAIExtractPhrases(message.payload || {}), sendResponse);
     return true;
   }
 
   // AI 静默吸收：输入框失焦时记录用户高频词（absorbed 数组）
   if (message.type === 'ABSORB_WORD') {
-    handleAbsorbWord(message.payload || {}).then(sendResponse);
+    withTimeout(handleAbsorbWord(message.payload || {}), sendResponse);
     return true;
   }
 
   // 吸收词确认加入常用语库
   if (message.type === 'ADD_ABSORB_TO_PHRASES') {
-    handleAddAbsorbToPhrases(message.payload || {}).then(sendResponse);
+    withTimeout(handleAddAbsorbToPhrases(message.payload || {}), sendResponse);
     return true;
   }
 
   // 常用语被使用：累加 useCount（微信输入法常用语仿制的排序依据）
   if (message.type === 'PHRASE_USED') {
-    handlePhraseUsed(message.payload || {}).then(sendResponse);
+    withTimeout(handlePhraseUsed(message.payload || {}), sendResponse);
     return true;
   }
 });
