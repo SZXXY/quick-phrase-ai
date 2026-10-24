@@ -13,8 +13,15 @@ let phrasesCache = [];
 let aiConfigCache = null;
 
 reloadCache();
-chrome.runtime.onInstalled.addListener(reloadCache);
-chrome.runtime.onStartup && chrome.runtime.onStartup.addListener(reloadCache);
+ensureDefaultSettings();
+chrome.runtime.onInstalled.addListener(() => {
+  reloadCache();
+  ensureDefaultSettings();
+});
+chrome.runtime.onStartup && chrome.runtime.onStartup.addListener(() => {
+  reloadCache();
+  ensureDefaultSettings();
+});
 
 /** 从 chrome.storage.local 重新加载缓存 */
 async function reloadCache() {
@@ -24,6 +31,32 @@ async function reloadCache() {
     aiConfigCache = data.aiConfig || null;
   } catch (e) {
     console.warn('[QuickPhraseAI] reload cache failed:', e);
+  }
+}
+
+// ========== 默认设置（快捷键与冷却，首次安装/更新时写入，用户已设置项保留） ==========
+const DEFAULT_SHORTCUTS = {
+  toggleEnabled: 'Alt+Q',        // 切换推荐功能总开关
+  manualSuggest: 'Alt+Space',    // 手动触发当前聚焦输入框的推荐
+  closeCooldown: 'Alt+X',        // 关闭浮层与虚影并进入冷却
+  fillTop: 'Ctrl+Shift+Enter'    // 直接补全最高可能候选/虚影
+};
+const DEFAULT_SETTINGS = {
+  shortcuts: DEFAULT_SHORTCUTS,
+  cooldownSec: 30,               // 关闭浮层后的冷却秒数，0 表示关闭冷却
+  enabled: true                  // 推荐功能总开关
+};
+
+/** 合并默认设置写入 storage：只补充缺失项，不覆盖用户自定义值 */
+async function ensureDefaultSettings() {
+  try {
+    const data = await chrome.storage.local.get(['settings']);
+    const cur = data.settings || {};
+    const shortcuts = Object.assign({}, DEFAULT_SHORTCUTS, cur.shortcuts || {});
+    const settings = Object.assign({}, DEFAULT_SETTINGS, cur, { shortcuts });
+    await chrome.storage.local.set({ settings });
+  } catch (e) {
+    console.warn('[QuickPhraseAI] ensure default settings failed:', e);
   }
 }
 
