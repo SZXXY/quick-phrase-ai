@@ -69,6 +69,31 @@
 
       <p class="tip">自定义 baseUrl 需同步在 manifest.json 的 host_permissions 中添加对应域名，否则请求会被浏览器拦截。</p>
     </section>
+
+    <!-- 快捷键与推荐设置 -->
+    <section class="section">
+      <div class="section-title">快捷键与推荐设置</div>
+
+      <p class="tip">点击输入框后按下组合键即可设置（如 Ctrl+Shift+Q）；Esc 取消录入；Delete 清除该快捷键。</p>
+
+      <label class="field-label" for="shortcutToggle">切换推荐总开关</label>
+      <input id="shortcutToggle" class="input shortcut-input" type="text" readonly placeholder="Alt+Q" data-fn="toggleEnabled">
+
+      <label class="field-label" for="shortcutSuggest">手动触发推荐</label>
+      <input id="shortcutSuggest" class="input shortcut-input" type="text" readonly placeholder="Alt+Space" data-fn="manualSuggest">
+
+      <label class="field-label" for="shortcutClose">关闭浮层并进入冷却</label>
+      <input id="shortcutClose" class="input shortcut-input" type="text" readonly placeholder="Alt+X" data-fn="closeCooldown">
+
+      <label class="field-label" for="shortcutFill">补全首选候选</label>
+      <input id="shortcutFill" class="input shortcut-input" type="text" readonly placeholder="Ctrl+Shift+Enter" data-fn="fillTop">
+
+      <button id="resetShortcutsBtn" class="btn">恢复默认快捷键</button>
+
+      <label class="field-label" for="cooldownSec">关闭浮层后冷却（秒）</label>
+      <input id="cooldownSec" class="input" type="number" min="0" max="3600" step="1" value="30">
+      <p class="tip">手动关闭候选框（X / Esc / Alt+X / 点击空白）后，冷却期内不再自动弹出候选框；输入 0 关闭冷却功能。手动触发推荐与总开关不受冷却影响。</p>
+    </section>
   </main>
 
   <script src="popup.js"></script>
