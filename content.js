@@ -18,7 +18,9 @@
     toggleEnabled: 'Alt+Q',        // 切换推荐功能总开关
     manualSuggest: 'Alt+Space',    // 手动触发当前聚焦输入框的推荐
     closeCooldown: 'Alt+X',        // 关闭浮层与虚影并进入冷却
-    fillTop: 'Ctrl+Shift+Enter'    // 直接补全最高可能候选/虚影
+    fillTop: 'Ctrl+Shift+Enter',   // 直接补全最高可能候选/虚影
+    select1: 'Alt+1',              // 填入候选框第 1 条候选
+    select2: 'Alt+2'               // 填入候选框第 2 条候选
   };
   const DEFAULT_COOLDOWN_SEC = 30; // 关闭浮层后的默认冷却秒数，0 表示关闭冷却
 
@@ -315,6 +317,12 @@
     }
     if (!matchedFn) return;
 
+    // 快速选择（Alt+1/Alt+2）：仅当候选框可见且候选数量足够时生效，否则不拦截按键
+    if (matchedFn === 'select1' || matchedFn === 'select2') {
+      const idx = matchedFn === 'select1' ? 0 : 1;
+      if (!overlayVisible() || overlayItems.length <= idx) return;
+    }
+
     // 命中快捷键：阻止默认行为（尤其 Alt+Space 在 Windows 会唤起窗口/输入法菜单）
     e.preventDefault();
     e.stopPropagation();
@@ -323,6 +331,8 @@
     else if (matchedFn === 'manualSuggest') manualSuggestShortcut();
     else if (matchedFn === 'closeCooldown') closeAndCooldownShortcut();
     else if (matchedFn === 'fillTop') fillTopShortcut();
+    else if (matchedFn === 'select1') fillCandidate(overlayItems[0].candidate);
+    else if (matchedFn === 'select2') fillCandidate(overlayItems[1].candidate);
   }
   document.addEventListener('keydown', handleShortcutKeydown, true);
 
@@ -626,51 +636,17 @@
     }
     hideGhost();
 
-    // 第三步：前两级本地均无命中，才调用 AI（等待期间先展示 loading，避免“没反应”）
-    const payload = {
-      context,
-      phrases: phrasesCache.map((p) => ({ id: p.id, text: p.text, tag: getTagText(p) }))
-    };
-    showLoadingOverlay();
-
-    let result = null;
-    try {
-      console.debug('[QuickPhraseAI] send AI_SUGGEST, context:', context);
-      result = await chrome.runtime.sendMessage({ type: 'AI_SUGGEST', payload });
-    } catch (e) {
-      console.warn('[QuickPhraseAI] sendMessage failed:', e);
-      result = { fallback: true };
-    }
-
-    let candidates = [];
-    let isFallback = true;
-    if (result && !result.fallback && Array.isArray(result.candidates) && result.candidates.length > 0) {
-      candidates = result.candidates.slice(0, MAX_CANDIDATES);
-      isFallback = false;
-    }
-    // 合并 AI 静默吸收词（count>=2，按 count 降序参与排序），保证高频输入内容优先展示
-    candidates = mergeAbsorbed(candidates);
-
-    if (candidates.length > 0) {
-      showOverlay(candidates, isFallback);
-    } else if (phrasesCache.length > 0 || eligibleAbsorbed().length > 0) {
-      // AI 无结果且本地无命中：兜底展示常用语 + 吸收词，保证有候选可点
-      console.debug('[QuickPhraseAI] AI empty, fallback to top phrases');
+    // 第三步：本地两级均无命中时不再调用 AI，仅做本地兜底。
+    // （不再自动监视输入内容 / 不发送 AI_SUGGEST 请求，全程离线比对本地常用语库）
+    if (phrasesCache.length > 0 || eligibleAbsorbed().length > 0) {
+      // 兜底展示常用语 + 吸收词，保证有候选可点
+      console.debug('[QuickPhraseAI] no local hit, fallback to top phrases');
       showOverlay(fallbackTopPhrases(), true);
     } else {
       // 常用语列表为空：展示引导提示而非静默无反应
       console.debug('[QuickPhraseAI] no phrases, show empty hint');
       showEmptyOverlay();
     }
-  }
-
-  function showLoadingOverlay() {
-    ensureOverlay();
-    overlayEl.innerHTML = '';
-    overlayItems = [];
-    selectedIndex = -1;
-    overlayEl.appendChild(makeBanner('AI 推荐中...'));
-    showAndPosition();
   }
 
   /** 兜底候选：有 tag 的常用语优先，组内按 createdAt 新→旧，再合并吸收词（count 降序优先），取前 LOCAL_TOP_N 条 */
