@@ -1,0 +1,321 @@
+/* options.css — 独立配置页样式（纯本地，风格与 popup 保持一致，自适应 360px 起） */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  width: 720px;
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 0 12px 24px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+  font-size: 13px;
+  color: #1f2329;
+  background: #f7f8fa;
+}
+
+/* ===== 头部 ===== */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 -12px;
+  padding: 14px 20px;
+  background: linear-gradient(135deg, #2563eb, #4f46e5);
+  color: #fff;
+}
+
+.header h1 {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.header .subtitle {
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+/* ===== 区块 ===== */
+.section {
+  background: #fff;
+  margin: 12px 0;
+  padding: 14px;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 10px;
+  color: #1f2329;
+}
+
+.subsection-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 14px 0 8px;
+  color: #1f2329;
+}
+
+.count {
+  color: #86909c;
+  font-weight: 400;
+  font-size: 12px;
+}
+
+/* ===== 常用语列表 ===== */
+.phrase-list,
+.absorbed-list {
+  list-style: none;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.phrase-item,
+.absorbed-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px;
+  border-bottom: 1px solid #f2f3f5;
+}
+
+.phrase-item:last-child,
+.absorbed-item:last-child {
+  border-bottom: none;
+}
+
+.phrase-main,
+.absorbed-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.phrase-text {
+  font-size: 13px;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+.phrase-tag,
+.absorbed-meta {
+  font-size: 11px;
+  color: #2563eb;
+  background: #eff4ff;
+  border-radius: 4px;
+  padding: 1px 6px;
+  display: inline-block;
+  margin-top: 3px;
+}
+
+.absorbed-meta {
+  color: #7a5cf0;
+  background: #f3efff;
+}
+
+.phrase-actions,
+.absorbed-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.empty-tip {
+  color: #86909c;
+  text-align: center;
+  padding: 12px 0;
+  font-size: 12px;
+}
+
+/* ===== 表单 ===== */
+.new-text,
+.new-tag,
+.input,
+select.input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #d5d9e0;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: inherit;
+  margin-bottom: 8px;
+  background: #fff;
+  color: #1f2329;
+}
+
+.new-text {
+  resize: vertical;
+  min-height: 48px;
+}
+
+.new-text:focus,
+.new-tag:focus,
+.input:focus,
+select.input:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+.field-label {
+  display: block;
+  font-size: 12px;
+  color: #4e5969;
+  margin-bottom: 4px;
+}
+
+/* ===== 按钮 ===== */
+.btn {
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  background: #e5e6eb;
+  color: #1f2329;
+  margin-top: 4px;
+}
+
+.btn:hover {
+  background: #d3d6dd;
+}
+
+.btn-sm {
+  width: auto;
+  padding: 6px 12px;
+  font-size: 12px;
+  margin-top: 0;
+}
+
+.btn-mini {
+  padding: 4px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.btn-mini:hover {
+  background: rgba(255, 255, 255, 0.25);
+  border-color: rgba(255, 255, 255, 0.6);
+}
+
+.btn-primary {
+  background: #2563eb;
+  color: #fff;
+}
+
+.btn-primary:hover {
+  background: #1d4ed8;
+}
+
+.btn-secondary {
+  background: #e8f0fe;
+  color: #2563eb;
+  border: 1px solid #c7d7fe;
+}
+
+.btn-secondary:hover {
+  background: #dbe8fe;
+}
+
+.btn-danger {
+  border: 1px solid #fde2e2;
+  color: #f53f3f;
+}
+
+.btn-danger:hover {
+  border-color: #f53f3f;
+  color: #f53f3f;
+  background: #fff1f0;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ===== 行布局 ===== */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.row .btn {
+  margin-top: 0;
+}
+
+.input.grow {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+/* ===== 导入导出 ===== */
+.import-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.import-row .tip {
+  margin-top: 0;
+  margin-left: 4px;
+}
+
+/* ===== 云存档 ===== */
+.switch-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 6px;
+  font-size: 13px;
+  color: #1f2329;
+  cursor: pointer;
+}
+
+.switch-row input {
+  width: 16px;
+  height: 16px;
+  accent-color: #2563eb;
+}
+
+.account-name {
+  font-weight: 600;
+  color: #2563eb;
+}
+
+/* ===== 提示 ===== */
+.tip {
+  font-size: 11px;
+  color: #86909c;
+  margin-top: 8px;
+  line-height: 1.5;
+}
+
+/* ===== 响应式：小窗口自适应 ===== */
+@media (max-width: 480px) {
+  body {
+    padding: 0 6px 16px;
+  }
+
+  .header {
+    margin: 0 -6px;
+    padding: 12px 14px;
+  }
+
+  .section {
+    padding: 10px;
+  }
+}
