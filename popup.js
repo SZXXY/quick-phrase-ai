@@ -13,6 +13,26 @@ const state = {
 
 const DEFAULT_CONFIG = { provider: 'openai', apiKey: '', model: 'gpt-4o-mini', baseUrl: '' };
 
+// 标签分隔符：支持逗号 / 分号 / 顿号，录入时按分隔符拆分为多个标签
+const TAG_SEP = /[,，;；、]/;
+
+/** 拆分标签：兼容数组输入与分隔字符串输入，去空去重 */
+function parseTags(raw) {
+  if (Array.isArray(raw)) {
+    return raw.map((t) => String(t || '').trim()).filter(Boolean);
+  }
+  return String(raw || '')
+    .split(TAG_SEP)
+    .map((t) => t.trim())
+    .filter(Boolean);
+}
+
+/** 读取常用语的标签文本（多标签数组优先，兼容旧单标签字符串），用于展示与回填 */
+function getTagText(p) {
+  if (Array.isArray(p.tags) && p.tags.length > 0) return p.tags.join('、');
+  return p.tag || '';
+}
+
 // 各 provider 默认 baseUrl（仅在选择 provider 时自动填充，用户可覆盖）
 const PROVIDER_DEFAULTS = {
   openai: 'https://api.openai.com/v1',
@@ -70,7 +90,7 @@ function renderList() {
 
     const tag = document.createElement('div');
     tag.className = 'phrase-tag';
-    tag.textContent = p.tag || '未分类';
+    tag.textContent = getTagText(p) || '未分类';
 
     main.appendChild(text);
     main.appendChild(tag);
@@ -102,7 +122,7 @@ function startEdit(id) {
   if (!p) return;
   state.editingId = id;
   $('newText').value = p.text;
-  $('newTag').value = p.tag || '';
+  $('newTag').value = getTagText(p);
   $('addTitle').textContent = '编辑常用语';
   $('addBtn').textContent = '更新常用语';
   $('cancelEditBtn').hidden = false;
@@ -124,18 +144,19 @@ async function savePhrase() {
     alert('常用语内容不能为空');
     return;
   }
-  const tag = $('newTag').value.trim();
+  const tags = parseTags($('newTag').value);
   const now = new Date().toISOString();
 
   if (state.editingId) {
     const p = state.phrases.find((x) => x.id === state.editingId);
     if (p) {
       p.text = text;
-      p.tag = tag;
+      p.tags = tags;
+      delete p.tag; // 新数据统一走 tags 数组，避免新旧字段歧义
     }
     cancelEdit();
   } else {
-    state.phrases.push({ id: uuid(), text, tag, createdAt: now });
+    state.phrases.push({ id: uuid(), text, tags, createdAt: now });
     $('newText').value = '';
     $('newTag').value = '';
   }
@@ -203,9 +224,9 @@ async function parseImportText(text, isJson) {
         const items = [];
         for (const item of data) {
           if (typeof item === 'string' && item.trim()) {
-            items.push({ text: item.trim(), tag: '' });
+            items.push({ text: item.trim(), tags: [] });
           } else if (item && typeof item === 'object' && typeof item.text === 'string' && item.text.trim()) {
-            items.push({ text: item.text.trim(), tag: typeof item.tag === 'string' ? item.tag.trim() : '' });
+            items.push({ text: item.text.trim(), tags: parseTags(item.tags != null ? item.tags : item.tag) });
           }
         }
         if (items.length > 0) return items;
@@ -242,7 +263,7 @@ function mergeImported(imported) {
     const key = text.toLowerCase();
     if (existing.has(key)) continue;
     existing.add(key);
-    added.push({ id: uuid(), text: text, tag: (item.tag || '').trim(), createdAt: new Date().toISOString() });
+    added.push({ id: uuid(), text: text, tags: parseTags(item.tags != null ? item.tags : item.tag), createdAt: new Date().toISOString() });
   }
   state.phrases = state.phrases.concat(added);
   return added;

@@ -13,6 +13,98 @@
   const MIN_ABSORB_LEN = 2;     // 静默吸收词最短长度（字符）
   const MAX_ABSORB_LEN = 50;    // 静默吸收词最长长度（字符）
 
+  // ========== 多标签工具（兼容旧数据单标签字符串） ==========
+  /** 标签分隔符：中英文逗号 / 顿号 / 分号 / 空白 */
+  const TAG_SEP = /[,，、;；\s]+/;
+
+  /** 将多标签字符串拆分为去重后的标签数组（兼容分隔格式） */
+  function splitTags(input) {
+    if (Array.isArray(input)) {
+      return input.map((t) => String(t || '').trim()).filter(Boolean);
+    }
+    const raw = String(input || '').trim();
+    if (!raw) return [];
+    return raw.split(TAG_SEP).map((s) => s.trim()).filter(Boolean);
+  }
+
+  /** 获取常用语标签数组：优先 tags 数组，旧数据 tag 字符串按分隔符拆分 */
+  function getTags(p) {
+    if (!p) return [];
+    const list = splitTags(p.tags);
+    if (list.length > 0) return list;
+    return splitTags(p.tag);
+  }
+
+  /** 标签展示文本（顿号连接） */
+  function getTagText(p) {
+    return getTags(p).join('、');
+  }
+
+  // ========== 小型本地匹配 AI：标签模糊匹配引擎（无需外部 API） ==========
+  /** Levenshtein 编辑距离（迭代实现，避免递归深度问题） */
+  function levenshtein(a, b) {
+    const s = String(a || '');
+    const t = String(b || '');
+    const m = s.length;
+    const n = t.length;
+    if (!m) return n;
+    if (!n) return m;
+    let prev = new Array(n + 1);
+    let cur = new Array(n + 1);
+    for (let j = 0; j <= n; j++) prev[j] = j;
+    for (let i = 1; i <= m; i++) {
+      cur[0] = i;
+      for (let j = 1; j <= n; j++) {
+        const cost = s[i - 1] === t[j - 1] ? 0 : 1;
+        cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+      }
+      const tmp = prev;
+      prev = cur;
+      cur = tmp;
+    }
+    return prev[n];
+  }
+
+  /**
+   * 标签模糊相似度（0~1）：
+   * 1) 完全相等 = 1；2) 子串命中（标签含关键词 = 0.9，关键词含标签 = 0.8）；
+   * 3) 编辑距离容错（短词 1 字符差异、长词 ≤40% 长度差异，按距离衰减）；
+   * 4) 字符重合覆盖度 ≥50% 的部分命中。
+   */
+  function labelSimilarity(keyword, label) {
+    const kw = String(keyword || '').toLowerCase();
+    const lb = String(label || '').toLowerCase();
+    if (!kw || !lb) return 0;
+    if (kw === lb) return 1;
+    if (lb.includes(kw)) return 0.9;
+    if (kw.includes(lb)) return 0.8;
+
+    const maxLen = Math.max(kw.length, lb.length);
+    const dist = levenshtein(kw, lb);
+    const threshold = Math.max(1, Math.floor(maxLen * 0.4));
+    if (dist > 0 && dist <= threshold) {
+      return Math.max(0.1, (1 - dist / maxLen) * 0.7);
+    }
+
+    const uniqueKw = new Set(kw.split(''));
+    const common = [...uniqueKw].filter((ch) => lb.includes(ch)).length;
+    const cover = common / Math.max(uniqueKw.size, 1);
+    if (cover >= 0.5) return 0.4 * cover;
+    return 0;
+  }
+
+  /** 标签集合 × 关键词集合的最优模糊评分（任一标签与任一关键词的最高相似度） */
+  function fuzzyTagScore(tags, keywords) {
+    let best = 0;
+    for (const tag of tags) {
+      for (const kw of keywords) {
+        const s = labelSimilarity(kw, tag);
+        if (s > best) best = s;
+      }
+    }
+    return best;
+  }
+
   // ========== 状态 ==========
   let activeElement = null;     // 当前聚焦的输入控件
   let debounceTimer = null;     // 防抖定时器
@@ -352,7 +444,7 @@
     // 第三步：前两级本地均无命中，才调用 AI（等待期间先展示 loading，避免“没反应”）
     const payload = {
       context,
-      phrases: phrasesCache.map((p) => ({ id: p.id, text: p.text, tag: p.tag || '' }))
+      phrases: phrasesCache.map((p) => ({ id: p.id, text: p.text, tag: getTagText(p) }))
     };
     showLoadingOverlay();
 
@@ -399,8 +491,8 @@
   /** 兜底候选：有 tag 的常用语优先，组内按 createdAt 新→旧，再合并吸收词（count 降序优先），取前 LOCAL_TOP_N 条 */
   function fallbackTopPhrases() {
     const byTime = (a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
-    const tagged = phrasesCache.filter((p) => p.tag).sort(byTime);
-    const untagged = phrasesCache.filter((p) => !p.tag).sort(byTime);
+    const tagged = phrasesCache.filter((p) => getTags(p).length > 0).sort(byTime);
+    const untagged = phrasesCache.filter((p) => getTags(p).length === 0).sort(byTime);
     const phrases = tagged.concat(untagged)
       .map((p) => ({ phraseId: p.id, reason: '常用语' }));
     return mergeAbsorbed(phrases).slice(0, LOCAL_TOP_N);
@@ -442,21 +534,24 @@
       .map((raw) => raw.replace(/[^\w\u4e00-\u9fa5]/g, '').toLowerCase())
       .filter(Boolean);
 
-    const scoreText = (text, tag) => {
-      const haystack = (text + ' ' + (tag || '')).toLowerCase();
+    const scoreText = (text, tags) => {
+      const haystack = (text + ' ' + tags.join(' ')).toLowerCase();
       let score = 0;
       for (const word of wordList) {
         if (!word) continue;
         if (haystack.includes(word)) score += word.length;
       }
-      if (tag && keywordStr.includes(tag.toLowerCase())) score += 10;
+      // 标签模糊匹配：小型本地匹配 AI 评分（子串 / 编辑距离容错 / 部分命中），
+      // 替代原「keywordStr 精确包含 tag 才 +10」的精准匹配
+      const tagScore = fuzzyTagScore(tags, wordList);
+      if (tagScore > 0) score += 10 * tagScore;
       return score;
     };
 
     const scored = [];
     for (const p of phrasesCache) {
-      const score = scoreText(p.text, p.tag);
-      if (score > 0) scored.push({ phraseId: p.id, text: p.text, tag: p.tag, score, count: 0 });
+      const score = scoreText(p.text, getTags(p));
+      if (score > 0) scored.push({ phraseId: p.id, text: p.text, tag: getTagText(p), score, count: 0 });
     }
     // 吸收词参与本地匹配：命中即按 count 降序参与排序（频次高排前面）
     for (const a of eligibleAbsorbed()) {
@@ -490,7 +585,7 @@
     const phraseMatches = phrasesCache
       .filter((p) => p && p.text && p.text.startsWith(prefix))
       .sort(byUse)
-      .map((p) => ({ phraseId: p.id, text: p.text, tag: p.tag || '', reason: '前缀匹配' }));
+      .map((p) => ({ phraseId: p.id, text: p.text, tag: getTagText(p), reason: '前缀匹配' }));
 
     const absorbMatches = eligibleAbsorbed()
       .filter((a) => a.text && a.text.startsWith(prefix))
@@ -650,7 +745,7 @@
       if (c.phraseId && !phrase) continue;
       const text = phrase ? phrase.text : c.text;
       if (!text) continue;
-      const tag = phrase ? (phrase.tag || '未分类') : 'AI吸收';
+      const tag = phrase ? (getTagText(phrase) || '未分类') : 'AI吸收';
 
       const item = document.createElement('div');
       item.className = 'qpa-item';

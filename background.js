@@ -183,7 +183,7 @@ async function safeReadBody(resp) {
 function buildPrompt(context, phrases) {
   const ctx = context || {};
   const list = (Array.isArray(phrases) && phrases.length)
-    ? phrases.map((p, i) => (i + 1) + '. [id=' + p.id + '] text=' + p.text + ' tag=' + (p.tag || '')).join('\n')
+    ? phrases.map((p, i) => (i + 1) + '. [id=' + p.id + '] text=' + p.text + ' tag=' + (Array.isArray(p.tags) && p.tags.length ? p.tags.join('、') : (p.tag || ''))).join('\n')
     : '（暂无常用语）';
 
   return [
