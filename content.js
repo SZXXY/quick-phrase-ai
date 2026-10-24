@@ -138,17 +138,53 @@
   let ghostCandidate = null;    // 当前虚影候选 {phraseId?, text, tag, reason, absorbCount?}
   let ghostPrefix = '';         // 触发虚影时输入框已输入前缀
   let ghostMeasureCtx = null;   // canvas 2d 上下文（测量输入前缀像素宽度）
+  let contextInvalidated = false; // 扩展上下文失效标志：置位后不再发起任何扩展 API 调用
+
+  // ========== 消息容错：安全发送（catch context invalidated / 通道关闭 / 无接收端） ==========
+  /** 判断是否为扩展上下文失效类错误（扩展重载 / SW 回收 / 页面残留旧 content script） */
+  function isContextInvalidation(err) {
+    const msg = String((err && err.message) || err || '');
+    return /Extension context invalidated|message channel closed|Receiving end does not exist|context invalidated|port closed/i.test(msg);
+  }
+
+  /** 标记上下文失效：后续不再发起扩展 API 调用并停止防抖调度 */
+  function markInvalidated() {
+    if (contextInvalidated) return;
+    contextInvalidated = true;
+    if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
+  }
+
+  /**
+   * 统一消息发送封装：捕获并静默所有 rejection（扩展重载 / SW 回收 / 无接收端），
+   * 降级为 { ok:false, silent:true } 返回，不打印噪音日志；上下文失效后直接短路返回。
+   */
+  function safeSendMessage(message) {
+    if (contextInvalidated) return Promise.resolve({ ok: false, silent: true });
+    try {
+      return chrome.runtime.sendMessage(message)
+        .then((res) => res || { ok: false })
+        .catch((err) => {
+          if (isContextInvalidation(err)) markInvalidated();
+          return { ok: false, silent: true };
+        });
+    } catch (err) {
+      if (isContextInvalidation(err)) markInvalidated();
+      return Promise.resolve({ ok: false, silent: true });
+    }
+  }
 
   // ========== 缓存初始化与刷新 ==========
   loadPhrases();
 
   async function loadPhrases() {
+    if (contextInvalidated) return;
     try {
       const data = await chrome.storage.local.get(['phrases', 'absorbed']);
       phrasesCache = Array.isArray(data.phrases) ? data.phrases : [];
       absorbedCache = Array.isArray(data.absorbed) ? data.absorbed : [];
     } catch (e) {
-      console.warn('[QuickPhraseAI] load phrases failed:', e);
+      // 扩展上下文失效 / storage 不可用时静默降级（不打印噪音日志）
+      if (isContextInvalidation(e)) markInvalidated();
     }
   }
 
@@ -181,22 +217,28 @@
 
   /** 从 storage 读取设置（启动时调用） */
   async function loadSettings() {
+    if (contextInvalidated) return;
     try {
       const data = await chrome.storage.local.get(['settings']);
       applySettings(data.settings || {});
     } catch (e) {
-      console.warn('[QuickPhraseAI] load settings failed:', e);
+      // 扩展上下文失效 / storage 不可用时静默降级（不打印噪音日志）
+      if (isContextInvalidation(e)) markInvalidated();
     }
   }
 
   // 显式通知刷新（popup 保存后 sendMessage）
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message && message.type === 'PHRASES_UPDATED') {
-      loadPhrases().then(() => sendResponse({ ok: true }));
+      loadPhrases().then(() => {
+        try { sendResponse({ ok: true }); } catch (e) { /* 通道已关闭，忽略 */ }
+      });
       return true;
     }
     if (message && message.type === 'SETTINGS_UPDATED') {
-      loadSettings().then(() => sendResponse({ ok: true }));
+      loadSettings().then(() => {
+        try { sendResponse({ ok: true }); } catch (e) { /* 通道已关闭，忽略 */ }
+      });
       return true;
     }
   });
@@ -262,9 +304,7 @@
     if (!host) return;
     const text = host.isContentEditable ? (host.innerText || '').trim() : (host.value || '').trim();
     if (text.length < MIN_ABSORB_LEN || text.length > MAX_ABSORB_LEN) return;
-    try {
-      chrome.runtime.sendMessage({ type: 'ABSORB_WORD', text }).catch(() => {});
-    } catch (e) { /* 静默记录失败不影响主流程 */ }
+    safeSendMessage({ type: 'ABSORB_WORD', text });
   }
 
   // 输入防抖：keyup / input 均触发（contenteditable 内部输入时 target 是子元素，用 contains 兼容）
@@ -507,6 +547,7 @@
   window.addEventListener('resize', repositionOverlay);
 
   function scheduleSuggest() {
+    if (contextInvalidated) return; // 扩展上下文失效：停止防抖调度，不再发起扩展 API 调用
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(collectAndSuggest, DEBOUNCE_MS);
   }
@@ -1054,13 +1095,10 @@
     if (c.reason === 'AI吸收·高频') {
       const ok = window.confirm('是否将「' + text + '」加入常用语？');
       if (ok) {
-        try {
-          chrome.runtime.sendMessage({ type: 'ADD_ABSORB_TO_PHRASES', text })
-            .then((res) => {
-              if (res && res.ok) loadPhrases(); // 常用语库已更新，刷新本地缓存
-            })
-            .catch(() => {});
-        } catch (e) { /* 忽略 */ }
+        safeSendMessage({ type: 'ADD_ABSORB_TO_PHRASES', text })
+          .then((res) => {
+            if (res && res.ok) loadPhrases(); // 常用语库已更新，刷新本地缓存
+          });
       }
     }
 
@@ -1074,13 +1112,10 @@
 
     // 常用语被使用：异步上报 background 累加 useCount（旧数据无 useCount 字段时按 0 起步）
     if (phraseId) {
-      try {
-        chrome.runtime.sendMessage({ type: 'PHRASE_USED', phraseId })
-          .then((res) => {
-            if (res && res.ok) loadPhrases(); // 使用计数已更新，刷新本地缓存
-          })
-          .catch(() => {});
-      } catch (e) { /* 忽略 */ }
+      safeSendMessage({ type: 'PHRASE_USED', phraseId })
+        .then((res) => {
+          if (res && res.ok) loadPhrases(); // 使用计数已更新，刷新本地缓存
+        });
     }
 
     // contenteditable：选区插入 / 追加
