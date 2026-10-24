@@ -39,7 +39,9 @@ const DEFAULT_SHORTCUTS = {
   toggleEnabled: 'Alt+Q',        // 切换推荐功能总开关
   manualSuggest: 'Alt+Space',    // 手动触发当前聚焦输入框的推荐
   closeCooldown: 'Alt+X',        // 关闭浮层与虚影并进入冷却
-  fillTop: 'Ctrl+Shift+Enter'    // 直接补全最高可能候选/虚影
+  fillTop: 'Ctrl+Shift+Enter',   // 直接补全最高可能候选/虚影
+  select1: 'Alt+1',              // 填入候选框第 1 条候选
+  select2: 'Alt+2'               // 填入候选框第 2 条候选
 };
 const DEFAULT_SETTINGS = {
   shortcuts: DEFAULT_SHORTCUTS,
