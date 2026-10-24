@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Quick Phrase AI - 配置</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <header class="header">
+    <div>
+      <h1>Quick Phrase AI</h1>
+      <span class="subtitle">扩展配置 · 纯本地 · 云存档</span>
+    </div>
+    <button id="backBtn" class="btn-mini">返回弹窗</button>
+  </header>
+
+  <main>
+    <!-- 常用语管理 -->
+    <section class="section">
+      <div class="section-title">常用语管理 <span id="count" class="count"></span></div>
+      <ul id="phraseList" class="phrase-list"></ul>
+      <p id="emptyTip" class="empty-tip" hidden>暂无常用语，先添加一条吧</p>
+
+      <div class="subsection-title" id="addTitle">添加常用语</div>
+      <textarea id="newText" class="new-text" placeholder="输入常用语内容" rows="2"></textarea>
+      <input id="newTag" class="new-tag" type="text" placeholder="标签（多个用逗号/顿号分隔，如：工作、回复、邮件）">
+      <div class="row">
+        <button id="addBtn" class="btn btn-primary">保存常用语</button>
+        <button id="cancelEditBtn" class="btn" hidden>取消编辑</button>
+      </div>
+      <p class="tip">提示：按 Ctrl + Enter 可快速保存常用语</p>
+
+      <div class="import-row">
+        <button id="importBtn" class="btn btn-secondary btn-sm">导入</button>
+        <button id="exportBtn" class="btn btn-secondary btn-sm">导出 JSON</button>
+        <input id="importFile" type="file" accept=".json,.txt,text/plain,application/json" hidden>
+        <p id="importResult" class="tip" hidden></p>
+      </div>
+      <p class="tip">导入支持 .json（完整备份 / 字符串数组 / {text,tag} 对象数组）与 .txt（按行拆分）；导出为完整 JSON 备份（常用语 + 吸收词 + 设置）。</p>
+    </section>
+
+    <!-- 吸收词管理 -->
+    <section class="section">
+      <div class="section-title">吸收词管理 <span id="absorbedCount" class="count"></span></div>
+      <p class="tip">吸收词由输入框失焦时静默记录的高频词生成（使用次数 ≥ 2 会进入候选）。可一键入库为常用语或移除。</p>
+      <ul id="absorbedList" class="absorbed-list"></ul>
+      <p id="absorbedEmptyTip" class="empty-tip" hidden>暂无吸收词</p>
+    </section>
+
+    <!-- 快捷键与推荐设置 -->
+    <section class="section">
+      <div class="section-title">快捷键与推荐设置</div>
+      <p class="tip">点击输入框后按下组合键即可设置（如 Ctrl+Shift+Q）；Esc 取消录入；Delete 清除该快捷键。</p>
+
+      <label class="field-label" for="shortcutToggle">切换推荐总开关</label>
+      <input id="shortcutToggle" class="input shortcut-input" type="text" readonly placeholder="Alt+Q" data-fn="toggleEnabled">
+
+      <label class="field-label" for="shortcutSuggest">手动触发推荐</label>
+      <input id="shortcutSuggest" class="input shortcut-input" type="text" readonly placeholder="Alt+Space" data-fn="manualSuggest">
+
+      <label class="field-label" for="shortcutClose">关闭浮层并进入冷却</label>
+      <input id="shortcutClose" class="input shortcut-input" type="text" readonly placeholder="Alt+X" data-fn="closeCooldown">
+
+      <label class="field-label" for="shortcutFill">补全首选候选</label>
+      <input id="shortcutFill" class="input shortcut-input" type="text" readonly placeholder="Ctrl+Shift+Enter" data-fn="fillTop">
+
+      <label class="field-label" for="shortcutSelect1">快速选择第 1 条候选</label>
+      <input id="shortcutSelect1" class="input shortcut-input" type="text" readonly placeholder="Alt+1" data-fn="select1">
+
+      <label class="field-label" for="shortcutSelect2">快速选择第 2 条候选</label>
+      <input id="shortcutSelect2" class="input shortcut-input" type="text" readonly placeholder="Alt+2" data-fn="select2">
+
+      <button id="resetShortcutsBtn" class="btn">恢复默认快捷键</button>
+
+      <label class="field-label" for="cooldownSec">关闭浮层后冷却（秒）</label>
+      <input id="cooldownSec" class="input" type="number" min="0" max="3600" step="1" value="30">
+      <p class="tip">手动关闭候选框（X / Esc / Alt+X / 点击空白）后，冷却期内不再自动弹出候选框；输入 0 关闭冷却功能。手动触发推荐与总开关不受冷却影响。</p>
+    </section>
+
+    <!-- AI 配置 -->
+    <section class="section">
+      <div class="section-title">AI 配置 <span class="count">（仅影响旧 AI 推荐链路，本地关键词/前缀匹配不受影响）</span></div>
+
+      <label class="field-label" for="provider">Provider</label>
+      <select id="provider" class="input">
+        <option value="openai">OpenAI</option>
+        <option value="deepseek">DeepSeek</option>
+        <option value="moonshot">Moonshot (Kimi)</option>
+        <option value="qwen">通义千问</option>
+        <option value="custom">自定义</option>
+      </select>
+
+      <label class="field-label" for="apiKey">API Key</label>
+      <input id="apiKey" class="input" type="password" placeholder="sk-...">
+
+      <label class="field-label" for="model">Model</label>
+      <input id="model" class="input" type="text" placeholder="gpt-4o-mini">
+
+      <label class="field-label" for="baseUrl">Base URL（可选）</label>
+      <input id="baseUrl" class="input" type="text" placeholder="https://api.openai.com/v1">
+
+      <button id="saveConfigBtn" class="btn btn-primary">保存 AI 配置</button>
+      <p class="tip">AI 配置仅用于旧 AI 推荐链路；当前版本已默认本地两级匹配（关键词 + 前缀虚影），不配置 AI 也能完整使用。</p>
+    </section>
+
+    <!-- 云存档与账户 -->
+    <section class="section">
+      <div class="section-title">云存档与账户</div>
+      <p class="tip">服务器地址默认指向本机云存档服务器（cloud-server，双击 start.bat 启动后可用）；也可切换到已部署的免费 Cloudflare Worker 地址（https://&lt;你的worker&gt;.workers.dev）。</p>
+
+      <label class="field-label" for="serverUrl">服务器地址</label>
+      <div class="row">
+        <input id="serverUrl" class="input grow" type="text" placeholder="http://127.0.0.1:8787">
+        <button id="testServerBtn" class="btn btn-secondary btn-sm">测试连接</button>
+      </div>
+
+      <div id="loginArea">
+        <label class="field-label" for="username">用户名</label>
+        <input id="username" class="input" type="text" autocomplete="username">
+        <label class="field-label" for="password">密码</label>
+        <input id="password" class="input" type="password" autocomplete="current-password">
+        <div class="row">
+          <button id="registerBtn" class="btn btn-secondary">注册</button>
+          <button id="loginBtn" class="btn btn-primary">登录</button>
+        </div>
+        <p class="tip">注册即创建新账户（密码经 scrypt 加盐哈希存储于服务器），登录后自动取得存档访问令牌。</p>
+      </div>
+
+      <div id="accountArea" hidden>
+        <p class="tip">已登录：<span id="accountName" class="account-name"></span></p>
+        <div class="row">
+          <button id="uploadBtn" class="btn btn-primary">上传存档</button>
+          <button id="downloadBtn" class="btn btn-secondary">下载存档</button>
+        </div>
+        <label class="switch-row"><input type="checkbox" id="autoSync"> 自动同步（常用语 / 吸收词 / 设置变更后 3 秒自动上传）</label>
+        <button id="logoutBtn" class="btn btn-danger btn-sm">退出登录</button>
+      </div>
+
+      <p id="cloudStatus" class="tip" hidden></p>
+    </section>
+  </main>
+
+  <script src="options.js"></script>
+</body>
+</html>
