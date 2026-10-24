@@ -1,3 +1,14 @@
+---
+AIGC:
+    Label: "1"
+    ContentProducer: 001191440300708461136T1XGW3
+    ProduceID: eeb8e68d7345f06ffd04e87f0c6ec173_bddc1681cefe11f1b37d525400248c00
+    ReservedCode1: UKTCWSCvvVW5GcJgdEsVb2jJksH3BsWQ8i+WC2sx2qcAztYq/oFljnEOQ3j7YwrjjlQ9AIR/Ji1qCTCoooU60wnzRoX6Q60VcOOFj4FMfqYcy0hs2IDjyjoVz9CWEus0/JVKl9iArlmFwox6Mdo6T+o2vQffRO5tJJDMNSurnC6c4zUzAxL8SSNcp24=
+    ContentPropagator: 001191440300708461136T1XGW3
+    PropagateID: eeb8e68d7345f06ffd04e87f0c6ec173_bddc1681cefe11f1b37d525400248c00
+    ReservedCode2: UKTCWSCvvVW5GcJgdEsVb2jJksH3BsWQ8i+WC2sx2qcAztYq/oFljnEOQ3j7YwrjjlQ9AIR/Ji1qCTCoooU60wnzRoX6Q60VcOOFj4FMfqYcy0hs2IDjyjoVz9CWEus0/JVKl9iArlmFwox6Mdo6T+o2vQffRO5tJJDMNSurnC6c4zUzAxL8SSNcp24=
+---
+
 # Quick Phrase AI
 
 常用语管理 + AI 自动识别网页输入场景并推荐候选词，帮助用户快速输入常用短语。支持 Microsoft Edge / Chrome（Manifest V3）。
@@ -82,3 +93,4 @@ quick-phrase-ai/
 - **AI 输出容错解析**：对 AI 返回文本依次做去代码块围栏、截取 JSON 数组、`JSON.parse`、正则逐行提取四级解析，最终按相关度取前 2 条候选展示。
 - **浮层生命周期**：Shadow DOM + `position:fixed` 视口坐标系渲染；`focusout` 延迟 200ms 关闭（避免点击候选误关），`Esc` / 点击外部（`composedPath` 穿透 Shadow DOM 判断）均可关闭；滚动、缩放自动重定位；拖拽后锁定手动位置不再跟随输入框。
 - **安全填入**：候选点击通过原生 value setter + 派发 `input` / `change` 事件完成，兼容 React / Vue 受控组件，不依赖 `document.execCommand`。
+*（内容由AI生成，仅供参考）*

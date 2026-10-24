@@ -26,6 +26,14 @@
       <input id="newTag" class="new-tag" type="text" placeholder="标签（如：工作 / 回复 / 邮件）">
       <button id="addBtn" class="btn btn-primary">保存常用语</button>
       <button id="cancelEditBtn" class="btn" hidden>取消编辑</button>
+
+      <!-- 导入常用语入口：.txt 按行拆分；.json 支持字符串数组 / {text,tag} 对象数组；无结构自由文本走 AI 提取 -->
+      <div class="import-row">
+        <button id="importBtn" class="btn btn-secondary btn-sm">导入常用语</button>
+        <input id="importFile" type="file" accept=".txt,.json,text/plain,application/json" hidden>
+        <p id="importResult" class="tip" hidden></p>
+      </div>
+
       <p class="tip">提示：按 Ctrl + Enter 可快速保存常用语</p>
     </section>
 

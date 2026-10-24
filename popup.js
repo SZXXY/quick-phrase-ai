@@ -39,6 +39,8 @@ function bindEvents() {
   $('saveConfigBtn').addEventListener('click', saveConfig);
   $('testBtn').addEventListener('click', testConnection);
   $('provider').addEventListener('change', onProviderChange);
+  $('importBtn').addEventListener('click', () => $('importFile').click());
+  $('importFile').addEventListener('change', handleImportFile);
   $('newText').addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault();
@@ -153,6 +155,97 @@ async function deletePhrase(id, idx) {
 async function persistPhrases() {
   await chrome.storage.local.set({ phrases: state.phrases });
   notifyContentRefresh();
+}
+
+// ========== 导入常用语 ==========
+
+/**
+ * 处理导入文件：
+ * - .txt：按行拆分为常用语；
+ * - .json：先按字符串数组 / {text,tag} 对象数组解析；
+ * - 无结构自由文本（json 解析失败或非数组）：已配置 AI 则调用 AI 提取，未配置/失败时按行兜底拆分。
+ * 导入成功后去重合并进 state.phrases，刷新列表并提示新增数量。
+ */
+async function handleImportFile(e) {
+  const file = e.target.files && e.target.files[0];
+  // 重置 input，允许连续选择同一文件
+  e.target.value = '';
+  if (!file) return;
+
+  const resultEl = $('importResult');
+  resultEl.hidden = false;
+  resultEl.textContent = '正在解析 ' + file.name + ' ...';
+
+  try {
+    const text = await file.text();
+    const imported = await parseImportText(text, file.name.toLowerCase().endsWith('.json'));
+    const added = mergeImported(imported);
+
+    await persistPhrases();
+    renderList();
+
+    if (added.length > 0) {
+      resultEl.textContent = '导入成功：新增 ' + added.length + ' 条常用语';
+    } else {
+      resultEl.textContent = '导入完成：没有新增内容（内容为空或已存在）';
+    }
+  } catch (err) {
+    resultEl.textContent = '导入失败：' + String((err && err.message) || err);
+  }
+}
+
+/** 解析导入文本为 [{ text, tag }] */
+async function parseImportText(text, isJson) {
+  if (isJson) {
+    try {
+      const data = JSON.parse(text);
+      if (Array.isArray(data)) {
+        const items = [];
+        for (const item of data) {
+          if (typeof item === 'string' && item.trim()) {
+            items.push({ text: item.trim(), tag: '' });
+          } else if (item && typeof item === 'object' && typeof item.text === 'string' && item.text.trim()) {
+            items.push({ text: item.text.trim(), tag: typeof item.tag === 'string' ? item.tag.trim() : '' });
+          }
+        }
+        if (items.length > 0) return items;
+      }
+    } catch (e) { /* JSON 解析失败：视为无结构自由文本 */ }
+    // 无结构自由文本：AI 提取（未配置 / 失败时按行兜底）
+    return extractFreeText(text);
+  }
+
+  // .txt：按行拆分
+  return text.split('\n').map((s) => s.trim()).filter(Boolean).map((t) => ({ text: t, tag: '' }));
+}
+
+/** 无结构自由文本：已配置 AI 则调用 background 提取，否则按行兜底 */
+async function extractFreeText(text) {
+  if (state.aiConfig && state.aiConfig.apiKey) {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: 'AI_EXTRACT_PHRASES', payload: { text } });
+      if (res && !res.fallback && Array.isArray(res.phrases) && res.phrases.length > 0) {
+        return res.phrases;
+      }
+    } catch (e) { /* 请求失败走按行兜底 */ }
+  }
+  return text.split('\n').map((s) => s.trim()).filter(Boolean).map((t) => ({ text: t, tag: '' }));
+}
+
+/** 与现有常用语去重后合并进 state.phrases，返回实际新增的条目 */
+function mergeImported(imported) {
+  const existing = new Set(state.phrases.map((p) => p.text.trim().toLowerCase()));
+  const added = [];
+  for (const item of imported) {
+    const text = (item.text || '').trim();
+    if (!text) continue;
+    const key = text.toLowerCase();
+    if (existing.has(key)) continue;
+    existing.add(key);
+    added.push({ id: uuid(), text: text, tag: (item.tag || '').trim(), createdAt: new Date().toISOString() });
+  }
+  state.phrases = state.phrases.concat(added);
+  return added;
 }
 
 // ========== AI 配置 ==========

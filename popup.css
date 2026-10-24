@@ -162,6 +162,18 @@ select.input:focus {
   background: #d3d6dd;
 }
 
+.btn-sm {
+  width: auto;
+  padding: 6px 12px;
+  font-size: 12px;
+  margin-top: 0;
+}
+
+/* ===== 导入常用语 ===== */
+.import-row {
+  margin-top: 8px;
+}
+
 .btn-primary {
   background: #2563eb;
   color: #fff;

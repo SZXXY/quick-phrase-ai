@@ -1,6 +1,8 @@
 // background.js — Service Worker
 // 职责：接收 content.js 的 AI_SUGGEST 请求，调用 AI API 获取候选词并做容错解析；
-//       接收 PHRASES_UPDATED 通知刷新常用语缓存。
+//       接收 PHRASES_UPDATED 通知刷新常用语缓存；
+//       接收 AI_EXTRACT_PHRASES 从自由文本提取常用语（导入入口，未配置时降级按行拆分）；
+//       接收 ABSORB_WORD 静默记录用户高频词（AI 吸收）与 ADD_ABSORB_TO_PHRASES 将吸收词入库。
 
 'use strict';
 
@@ -44,6 +46,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // AI 连通性测试：异步处理，保持消息通道开启
   if (message.type === 'AI_TEST') {
     handleAITest().then(sendResponse);
+    return true;
+  }
+
+  // AI 提取常用语：自由文本 -> 常用语列表（不可用时降级按行拆分）
+  if (message.type === 'AI_EXTRACT_PHRASES') {
+    handleAIExtractPhrases(message.payload || {}).then(sendResponse);
+    return true;
+  }
+
+  // AI 静默吸收：输入框失焦时记录用户高频词（absorbed 数组）
+  if (message.type === 'ABSORB_WORD') {
+    handleAbsorbWord(message.payload || {}).then(sendResponse);
+    return true;
+  }
+
+  // 吸收词确认加入常用语库
+  if (message.type === 'ADD_ABSORB_TO_PHRASES') {
+    handleAddAbsorbToPhrases(message.payload || {}).then(sendResponse);
+    return true;
+  }
+
+  // 常用语被使用：累加 useCount（微信输入法常用语仿制的排序依据）
+  if (message.type === 'PHRASE_USED') {
+    handlePhraseUsed(message.payload || {}).then(sendResponse);
     return true;
   }
 });
@@ -277,5 +303,197 @@ async function handleAITest() {
     };
   } finally {
     clearTimeout(timer);
+  }
+}
+
+// ========== AI 提取常用语（导入入口） ==========
+
+/**
+ * 处理 AI_EXTRACT_PHRASES：从自由文本中提取常用语。
+ * AI 可用时调用 AI 提取（JSON 字符串数组，保留原文、去重）；
+ * AI 未配置 / 请求失败时降级按行拆分（每行一条）。
+ * 返回 { fallback, phrases: [{ text, tag }], error? }。
+ */
+async function handleAIExtractPhrases(payload) {
+  const aiConfig = await readAIConfig();
+  const text = String((payload && payload.text) || '');
+  const lines = text.split('\n').map((s) => s.trim()).filter(Boolean);
+
+  // AI 未配置 / 无 API Key：降级按行拆分
+  if (!aiConfig || !aiConfig.apiKey) {
+    return { fallback: true, phrases: lines.map((t) => ({ text: t, tag: '' })) };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+
+  const body = {
+    model: aiConfig.model || 'gpt-4o-mini',
+    temperature: 0.3,
+    max_tokens: 800,
+    messages: [
+      {
+        role: 'system',
+        content:
+          '你是常用语整理助手。用户会给你一段自由文本（可能包含多个语义片段）。' +
+          '请提取其中可以作为「常用语」使用的短语或句子，保留原文、不要改写，' +
+          '去掉重复项后返回 JSON 字符串数组，例如 ["你好","收到，谢谢"]。' +
+          '只返回 JSON 数组，不要返回任何其他文字或 markdown。'
+      },
+      { role: 'user', content: text.slice(0, 4000) }
+    ]
+  };
+
+  try {
+    const resp = await fetch(normalizeBaseUrl(aiConfig.baseUrl), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + aiConfig.apiKey
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+
+    if (!resp.ok) {
+      const detail = await safeReadBody(resp);
+      throw new Error('AI API HTTP ' + resp.status + ': ' + detail);
+    }
+
+    const data = await resp.json();
+    const content = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
+    const arr = parseTextArray(content);
+    if (arr.length > 0) {
+      return { fallback: false, phrases: arr.map((t) => ({ text: t, tag: '' })) };
+    }
+    // AI 未返回有效数组：降级按行拆分
+    return { fallback: true, phrases: lines.map((t) => ({ text: t, tag: '' })) };
+  } catch (err) {
+    console.warn('[QuickPhraseAI] AI extract failed:', err);
+    return {
+      fallback: true,
+      phrases: lines.map((t) => ({ text: t, tag: '' })),
+      error: String((err && err.message) || err)
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** 容错解析 AI 返回的字符串数组（去除 markdown 围栏、截取 [] 区间、JSON.parse、逐行兜底） */
+function parseTextArray(text) {
+  if (!text) return [];
+  let cleaned = String(text).trim();
+
+  const fence = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) cleaned = fence[1].trim();
+
+  const start = cleaned.indexOf('[');
+  const end = cleaned.lastIndexOf(']');
+  if (start !== -1 && end > start) cleaned = cleaned.slice(start, end + 1);
+
+  try {
+    const arr = JSON.parse(cleaned);
+    if (Array.isArray(arr)) {
+      return arr.filter((x) => typeof x === 'string' && x.trim()).slice(0, 200);
+    }
+  } catch (e) {
+    console.warn('[QuickPhraseAI] text array parse failed, fallback to line scan:', e);
+  }
+
+  // 兜底：逐行拆分
+  return String(cleaned).split('\n').map((s) => s.trim()).filter(Boolean).slice(0, 200);
+}
+
+// ========== AI 静默吸收高频词 ==========
+
+/**
+ * 处理 ABSORB_WORD：静默记录用户在输入框写入的词及使用频次。
+ * absorbed 数组元素：{ text, tag:'', count, lastUsed }。
+ * 同文本再次出现时 count+1；数组上限 500 条（按 lastUsed 保留最近）。
+ */
+async function handleAbsorbWord(payload) {
+  const text = String((payload && payload.text) || '').trim();
+  if (!text) return { ok: false, error: 'empty' };
+
+  try {
+    const data = await chrome.storage.local.get(['absorbed']);
+    const absorbed = Array.isArray(data.absorbed) ? data.absorbed : [];
+    const now = Date.now();
+    const existing = absorbed.find((a) => a && a.text === text);
+
+    if (existing) {
+      existing.count = (existing.count || 0) + 1;
+      existing.lastUsed = now;
+    } else {
+      absorbed.push({ text: text, tag: '', count: 1, lastUsed: now });
+    }
+
+    // 按最近使用排序并截断，避免无限膨胀
+    absorbed.sort((a, b) => (b.lastUsed || 0) - (a.lastUsed || 0));
+    if (absorbed.length > 500) absorbed.length = 500;
+
+    await chrome.storage.local.set({ absorbed });
+    return { ok: true, count: existing ? existing.count : 1 };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+}
+
+/**
+ * 处理 ADD_ABSORB_TO_PHRASES：将吸收词加入常用语库。
+ * 已存在同文本常用语时忽略（返回 duplicate）；成功则刷新缓存并通知刷新。
+ */
+async function handleAddAbsorbToPhrases(payload) {
+  const text = String((payload && payload.text) || '').trim();
+  if (!text) return { ok: false, error: 'empty' };
+
+  try {
+    const data = await chrome.storage.local.get(['phrases']);
+    const phrases = Array.isArray(data.phrases) ? data.phrases : [];
+    const lower = text.toLowerCase();
+
+    if (phrases.some((p) => p && p.text && p.text.toLowerCase() === lower)) {
+      return { ok: false, reason: 'duplicate' };
+    }
+
+    phrases.push({
+      id: 'p_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+      text: text,
+      tag: '',
+      createdAt: new Date().toISOString()
+    });
+
+    await chrome.storage.local.set({ phrases });
+    reloadCache();
+    // 广播通知（popup 打开时可用于刷新，无监听时无害）
+    try { chrome.runtime.sendMessage({ type: 'PHRASES_UPDATED' }); } catch (e) { /* ignore */ }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+}
+
+/**
+ * 处理 PHRASE_USED：常用语被填入时将其 useCount +1。
+ * 旧数据无 useCount 字段时按 0 起步；storage 更新后自然触发各端缓存刷新。
+ * 返回 { ok, useCount }。
+ */
+async function handlePhraseUsed(payload) {
+  const phraseId = String((payload && payload.phraseId) || '');
+  if (!phraseId) return { ok: false, error: 'empty' };
+
+  try {
+    const data = await chrome.storage.local.get(['phrases']);
+    const phrases = Array.isArray(data.phrases) ? data.phrases : [];
+    const phrase = phrases.find((p) => p && p.id === phraseId);
+    if (!phrase) return { ok: false, error: 'not found' };
+
+    phrase.useCount = (phrase.useCount || 0) + 1;
+    await chrome.storage.local.set({ phrases });
+    reloadCache();
+    return { ok: true, useCount: phrase.useCount };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
   }
 }
