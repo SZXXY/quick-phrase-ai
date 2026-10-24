@@ -80,7 +80,7 @@ async function init() {
 
 function bindEvents() {
   const openOptionsBtn = $('openOptionsBtn');
-  if (openOptionsBtn) openOptionsBtn.addEventListener('click', () => chrome.runtime.openOptionsPage());
+  if (openOptionsBtn) openOptionsBtn.addEventListener('click', openOptionsPageSafe);
   $('addBtn').addEventListener('click', savePhrase);
   $('cancelEditBtn').addEventListener('click', cancelEdit);
   $('saveConfigBtn').addEventListener('click', saveConfig);
@@ -106,6 +106,25 @@ function bindEvents() {
   });
   $('resetShortcutsBtn').addEventListener('click', resetShortcuts);
   $('cooldownSec').addEventListener('change', onCooldownChange);
+}
+
+// ========== 打开配置页（容错） ==========
+
+/** 打开配置页：扩展上下文失效时静默降级并在 popup 内提示重新加载 */
+function openOptionsPageSafe() {
+  try {
+    chrome.runtime.openOptionsPage();
+  } catch (e) {
+    showReloadHint();
+  }
+}
+
+/** 扩展重载后旧 popup 上下文失效的提示 */
+function showReloadHint() {
+  const hint = document.getElementById('reloadHint');
+  if (!hint) return;
+  hint.hidden = false;
+  hint.textContent = '扩展已更新，请到 edge://extensions 重新加载扩展';
 }
 
 // ========== 快捷键与冷却设置 ==========
@@ -483,9 +502,16 @@ async function testConnection() {
       result.textContent = '连接失败：' + ((res && res.error) || '未知错误');
     }
   } catch (e) {
-    // sendMessage 本身异常（如 background 未就绪）
-    result.className = 'test-result test-fail';
-    result.textContent = '连接失败：' + String((e && e.message) || e);
+    // sendMessage 本身异常（如 background 未就绪 / 扩展上下文失效）
+    const msg = String((e && e.message) || e);
+    if (/Extension context invalidated|message channel closed|context invalidated/i.test(msg)) {
+      showReloadHint();
+      result.className = 'test-result test-fail';
+      result.textContent = '连接失败：扩展上下文已失效，请到 edge://extensions 重新加载扩展';
+    } else {
+      result.className = 'test-result test-fail';
+      result.textContent = '连接失败：' + msg;
+    }
   } finally {
     // 无论成败恢复按钮可用状态
     btn.disabled = false;
@@ -508,10 +534,10 @@ async function notifyContentRefresh() {
       if (tab.id == null) continue;
       try {
         await chrome.tabs.sendMessage(tab.id, { type: 'PHRASES_UPDATED' });
-      } catch (e) { /* 无 content script 的页面会抛错，忽略 */ }
+      } catch (e) { /* 无 content script 的页面会抛错 / 扩展上下文失效，静默忽略 */ }
     }
   } catch (e) {
-    console.warn('[QuickPhraseAI] notify tabs failed:', e);
+    // 扩展上下文失效 / tabs 不可用时静默降级（不打印噪音日志）
   }
 }
 
