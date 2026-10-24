@@ -1,3 +1,14 @@
+---
+AIGC:
+    Label: "1"
+    ContentProducer: 001191440300708461136T1XGW3
+    ProduceID: eeb8e68d7345f06ffd04e87f0c6ec173_bc27794acf5611f1b37d525400248c00
+    ReservedCode1: 4hY1cmWQysKBbE/bQfXTTTbVthdtL7GZd4+t7OH1QQy7ujW2UsbmoXud5zUebvpuRDkjP36GNTdeEid5h2HrKG5rbtRz81if6x6D1rdijK44/Wt9mEEBtu17Yyde0gmYXpVTYktWCXPmelzVgLmbC+M1bQ9HhRTUutAj2aeU/8jGBgm2XwMoUVKrJK4=
+    ContentPropagator: 001191440300708461136T1XGW3
+    PropagateID: eeb8e68d7345f06ffd04e87f0c6ec173_bc27794acf5611f1b37d525400248c00
+    ReservedCode2: 4hY1cmWQysKBbE/bQfXTTTbVthdtL7GZd4+t7OH1QQy7ujW2UsbmoXud5zUebvpuRDkjP36GNTdeEid5h2HrKG5rbtRz81if6x6D1rdijK44/Wt9mEEBtu17Yyde0gmYXpVTYktWCXPmelzVgLmbC+M1bQ9HhRTUutAj2aeU/8jGBgm2XwMoUVKrJK4=
+---
+
 # Quick Phrase AI 云存档服务器
 
 本目录为 quick-phrase-ai 扩展的云存档服务端。提供账户注册、登录与存档上传/下载接口，支持两种部署方式：
@@ -117,3 +128,4 @@ Cloudflare 提供免费 Workers 与 KV 额度，无需绑卡即可部署，适�
 - 密码始终以加盐哈希存储，服务器不保存明文。
 - token 为随机串，具备访问权限即等于该用户；请勿泄露。
 - 本机服务器默认允许任意来源访问（CORS `*`），仅监听 `127.0.0.1` 时风险可控；如改为 `0.0.0.0` 或部署公网，建议设置 `ALLOW_ORIGINS` 白名单或使用 Worker 模板。
+*（内容由AI生成，仅供参考）*
