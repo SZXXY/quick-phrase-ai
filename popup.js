@@ -79,6 +79,8 @@ async function init() {
 }
 
 function bindEvents() {
+  const openOptionsBtn = $('openOptionsBtn');
+  if (openOptionsBtn) openOptionsBtn.addEventListener('click', () => chrome.runtime.openOptionsPage());
   $('addBtn').addEventListener('click', savePhrase);
   $('cancelEditBtn').addEventListener('click', cancelEdit);
   $('saveConfigBtn').addEventListener('click', saveConfig);
