@@ -9,10 +9,13 @@
     "https://api.deepseek.com/*",
     "https://api.moonshot.cn/*",
     "https://dashscope.aliyuncs.com/*",
-    "https://api.deepseek.com/*",
-    "https://api.deepseek.com/*"
-    
+    "http://127.0.0.1:8787/*",
+    "https://*.workers.dev/*"
   ],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
   "background": {
     "service_worker": "background.js"
   },
