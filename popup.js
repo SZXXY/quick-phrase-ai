@@ -8,10 +8,28 @@ const $ = (id) => document.getElementById(id);
 const state = {
   phrases: [],
   aiConfig: null,
+  settings: null, // { shortcuts, cooldownSec, enabled }
   editingId: null // 正在编辑的常用语 id
 };
 
 const DEFAULT_CONFIG = { provider: 'openai', apiKey: '', model: 'gpt-4o-mini', baseUrl: '' };
+
+// 默认快捷键（与 background.js / content.js 保持一致）
+const DEFAULT_SHORTCUTS = {
+  toggleEnabled: 'Alt+Q',
+  manualSuggest: 'Alt+Space',
+  closeCooldown: 'Alt+X',
+  fillTop: 'Ctrl+Shift+Enter'
+};
+const DEFAULT_COOLDOWN_SEC = 30;
+
+// 功能名 -> popup 输入框 id
+const SHORTCUT_FIELDS = {
+  toggleEnabled: 'shortcutToggle',
+  manualSuggest: 'shortcutSuggest',
+  closeCooldown: 'shortcutClose',
+  fillTop: 'shortcutFill'
+};
 
 // 标签分隔符：支持逗号 / 分号 / 顿号，录入时按分隔符拆分为多个标签
 const TAG_SEP = /[,，;；、]/;
@@ -45,11 +63,14 @@ const PROVIDER_DEFAULTS = {
 init();
 
 async function init() {
-  const data = await chrome.storage.local.get(['phrases', 'aiConfig']);
+  const data = await chrome.storage.local.get(['phrases', 'aiConfig', 'settings']);
   state.phrases = Array.isArray(data.phrases) ? data.phrases : [];
   state.aiConfig = Object.assign({}, DEFAULT_CONFIG, data.aiConfig || {});
+  state.settings = Object.assign({}, { shortcuts: {}, cooldownSec: DEFAULT_COOLDOWN_SEC, enabled: true }, data.settings || {});
+  state.settings.shortcuts = Object.assign({}, DEFAULT_SHORTCUTS, (data.settings && data.settings.shortcuts) || {});
   renderList();
   fillConfigForm();
+  fillShortcutForm();
   bindEvents();
 }
 
@@ -67,6 +88,118 @@ function bindEvents() {
       savePhrase();
     }
   });
+
+  // 快捷键录制：点击输入框聚焦后按组合键录入；Esc 取消；Delete/Backspace 清除
+  document.querySelectorAll('.shortcut-input').forEach((input) => {
+    input.addEventListener('focus', () => {
+      recordingValue = input.value;
+      input.select();
+    });
+    input.addEventListener('keydown', onShortcutKeydown);
+    input.addEventListener('blur', () => { input.value = input.value; });
+  });
+  $('resetShortcutsBtn').addEventListener('click', resetShortcuts);
+  $('cooldownSec').addEventListener('change', onCooldownChange);
+}
+
+// ========== 快捷键与冷却设置 ==========
+
+/** 当前正在录制的快捷键输入框原值（Esc 取消时恢复） */
+let recordingValue = '';
+
+/**
+ * 将 keydown 事件解析为规范组合键字符串（与 content.js 一致）。
+ * 仅处理「修饰键 + 非纯字符主键」的组合且必须含 Ctrl/Alt/Meta 之一，
+ * 避免 Shift+q（输出大写 Q）等纯字符输入被当作快捷键。
+ */
+function normalizeShortcut(e) {
+  const key = e.key;
+  let main = null;
+  if (/^[a-zA-Z]$/.test(key)) main = key.toUpperCase();
+  else if (/^[0-9]$/.test(key)) main = key;
+  else if (/^F([1-9]|1[0-2])$/.test(key)) main = key;
+  else if (key === ' ' || key === 'Spacebar') main = 'Space';
+  else if (key === 'Enter') main = 'Enter';
+  else if (key === 'Escape') main = 'Esc';
+  else return null;
+
+  if (!(e.ctrlKey || e.altKey || e.metaKey)) return null;
+
+  const parts = [];
+  if (e.ctrlKey) parts.push('Ctrl');
+  if (e.altKey) parts.push('Alt');
+  if (e.shiftKey) parts.push('Shift');
+  if (e.metaKey) parts.push('Meta');
+  parts.push(main);
+  return parts.join('+');
+}
+
+/** 快捷键输入框 keydown：录制组合键 / Esc 取消 / Delete 清除 */
+function onShortcutKeydown(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const input = e.currentTarget;
+  const fn = input.dataset.fn;
+  if (!fn) return;
+
+  if (e.key === 'Escape') {
+    input.value = recordingValue; // 取消录入，恢复原值
+    input.blur();
+    return;
+  }
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    setShortcut(fn, '');
+    return;
+  }
+
+  const combo = normalizeShortcut(e);
+  if (!combo) return;
+  setShortcut(fn, combo);
+}
+
+/** 保存单个快捷键（空字符串表示清除） */
+function setShortcut(fn, combo) {
+  state.settings.shortcuts[fn] = combo;
+  const input = $(SHORTCUT_FIELDS[fn]);
+  if (input) input.value = combo;
+  saveSettings();
+}
+
+/** 恢复默认快捷键 */
+function resetShortcuts() {
+  Object.keys(DEFAULT_SHORTCUTS).forEach((fn) => {
+    state.settings.shortcuts[fn] = DEFAULT_SHORTCUTS[fn];
+    const input = $(SHORTCUT_FIELDS[fn]);
+    if (input) input.value = DEFAULT_SHORTCUTS[fn];
+  });
+  saveSettings();
+}
+
+/** 冷却秒数变更 */
+function onCooldownChange() {
+  const raw = parseInt($('cooldownSec').value, 10);
+  const sec = isNaN(raw) ? 0 : Math.max(0, Math.min(3600, raw));
+  $('cooldownSec').value = sec;
+  state.settings.cooldownSec = sec;
+  saveSettings();
+}
+
+/** 填充快捷键与冷却表单 */
+function fillShortcutForm() {
+  Object.keys(SHORTCUT_FIELDS).forEach((fn) => {
+    const input = $(SHORTCUT_FIELDS[fn]);
+    if (input) input.value = state.settings.shortcuts[fn] || '';
+  });
+  $('cooldownSec').value = (state.settings.cooldownSec === undefined ? DEFAULT_COOLDOWN_SEC : state.settings.cooldownSec);
+}
+
+/** 将 settings 写入 storage（content.js 通过 onChanged 自动刷新） */
+async function saveSettings() {
+  try {
+    await chrome.storage.local.set({ settings: state.settings });
+  } catch (e) {
+    console.warn('[QuickPhraseAI] save settings failed:', e);
+  }
 }
 
 // ========== 常用语 CRUD ==========
